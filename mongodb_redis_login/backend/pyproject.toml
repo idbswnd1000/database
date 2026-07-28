@@ -1,0 +1,16 @@
+[project]
+name = "mongodb-redis-login"
+version = "0.1.0"
+requires-python = ">=3.12"
+
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "pymongo",
+    "redis",
+    "python-dotenv",
+    "pyjwt",
+    "bcrypt",
+    "pandas",
+    "openpyxl"
+]
