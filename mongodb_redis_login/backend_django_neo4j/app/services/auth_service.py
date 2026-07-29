@@ -1,122 +1,202 @@
-import os
 import uuid
 
-import bcrypt
+from django.contrib.auth.hashers import (
+    check_password,
+    make_password,
+)
+from rest_framework.exceptions import (
+    AuthenticationFailed,
+    ValidationError,
+)
 
-from common.mongodb import user_collection
-from common.redis_client import redis_client
-from common.jwt import create_access_token
+from app.repositories import (
+    auth_repository,
+)
+from common.jwt import (
+    TokenException,
+    create_access_token,
+    create_refresh_token,
+    decode_token,
+    refresh_expiration_seconds,
+)
+from common.redis_client import (
+    delete_refresh_token,
+    get_refresh_token,
+    save_refresh_token,
+)
+
+
+def convert_public_user(
+    user: dict,
+) -> dict:
+    return {
+        "userId": user["userId"],
+        "username": user["username"],
+        "email": user.get("email", ""),
+    }
 
 
 def register_user(
-    username: str,
-    password: str
-):
+    data: dict,
+) -> dict:
+    username = data["username"].strip()
+    email = data["email"].strip().lower()
+    password = data["password"]
 
-    existing_user = user_collection.find_one(
-        {
-            "username": username
-        }
+    if auth_repository.find_by_username(
+        username
+    ):
+        raise ValidationError({
+            "username": (
+                "이미 사용 중인 아이디입니다."
+            )
+        })
+
+    if auth_repository.find_by_email(email):
+        raise ValidationError({
+            "email": (
+                "이미 사용 중인 이메일입니다."
+            )
+        })
+
+    user = auth_repository.create_user(
+        user_id=str(uuid.uuid4()),
+        username=username,
+        email=email,
+        password_hash=make_password(
+            password
+        ),
     )
 
-    if existing_user:
-        raise ValueError(
-            "이미 존재하는 사용자입니다."
-        )
-
-    password_hash = bcrypt.hashpw(
-        password.encode("utf-8"),
-        bcrypt.gensalt()
-    ).decode("utf-8")
-
-    user_collection.insert_one(
-        {
-            "username": username,
-            "password_hash": password_hash
-        }
-    )
-
-    return {
-        "message": "회원가입 성공"
-    }
+    return convert_public_user(user)
 
 
 def login_user(
-    username: str,
-    password: str
-):
-
-    user = user_collection.find_one(
-        {
-            "username": username
-        }
+    data: dict,
+) -> dict:
+    user = auth_repository.find_by_username(
+        data["username"].strip()
     )
 
     if not user:
-        raise ValueError(
-            "사용자가 존재하지 않습니다."
+        raise AuthenticationFailed(
+            "아이디 또는 비밀번호가 "
+            "올바르지 않습니다."
         )
 
-    valid = bcrypt.checkpw(
-        password.encode("utf-8"),
-        user["password_hash"].encode("utf-8")
-    )
-
-    if not valid:
-        raise ValueError(
-            "비밀번호가 일치하지 않습니다."
+    if not check_password(
+        data["password"],
+        user["password"],
+    ):
+        raise AuthenticationFailed(
+            "아이디 또는 비밀번호가 "
+            "올바르지 않습니다."
         )
 
-    access_token = create_access_token(
-        username
-    )
-
-    refresh_token = str(
-        uuid.uuid4()
-    )
-
-    redis_client.set(
-        f"refresh:{refresh_token}",
-        username,
-        ex=int(
-            os.getenv(
-                "REFRESH_TOKEN_EXPIRE_SECONDS",
-                604800
-            )
+    if not user.get("isActive", True):
+        raise AuthenticationFailed(
+            "비활성화된 사용자입니다."
         )
+
+    access_token = create_access_token(user)
+
+    refresh_token, token_id = (
+        create_refresh_token(user)
+    )
+
+    save_refresh_token(
+        user_id=user["userId"],
+        token_id=token_id,
+        refresh_token=refresh_token,
+        expires_seconds=(
+            refresh_expiration_seconds()
+        ),
     )
 
     return {
-        "access_token": access_token,
-        "refresh_token": refresh_token
-    }
-
-
-def logout_user(refresh_token: str):
-
-    redis_client.delete(
-        f"refresh:{refresh_token}"
-    )
-
-    return {
-        "message": "로그아웃 성공"
+        "access": access_token,
+        "refresh": refresh_token,
+        "user": convert_public_user(user),
     }
 
 
 def refresh_access_token(
-    refresh_token: str
-):
+    refresh_token: str,
+) -> dict:
+    try:
+        payload = decode_token(
+            refresh_token,
+            "refresh",
+        )
 
-    username = redis_client.get(
-        f"refresh:{refresh_token}"
+    except TokenException as error:
+        raise AuthenticationFailed(
+            str(error)
+        ) from error
+
+    user_id = payload["sub"]
+    token_id = payload["jti"]
+
+    saved_token = get_refresh_token(
+        user_id,
+        token_id,
     )
 
-    if not username:
-        raise ValueError(
-            "Refresh Token이 만료되었거나 유효하지 않습니다."
+    if (
+        not saved_token
+        or saved_token != refresh_token
+    ):
+        raise AuthenticationFailed(
+            "로그아웃되었거나 "
+            "폐기된 토큰입니다."
+        )
+
+    user = auth_repository.find_by_id(
+        user_id
+    )
+
+    if not user:
+        raise AuthenticationFailed(
+            "사용자를 찾을 수 없습니다."
         )
 
     return {
-        "access_token":
-            create_access_token(username)
+        "access": create_access_token(
+            user
+        )
     }
+
+
+def logout_user(
+    refresh_token: str,
+) -> None:
+    try:
+        payload = decode_token(
+            refresh_token,
+            "refresh",
+        )
+
+    except TokenException as error:
+        raise AuthenticationFailed(
+            str(error)
+        ) from error
+
+    delete_refresh_token(
+        payload["sub"],
+        payload["jti"],
+    )
+
+
+def get_current_user(
+    user_id: str,
+) -> dict:
+    user = auth_repository.find_by_id(
+        user_id
+    )
+
+    if not user:
+        raise AuthenticationFailed(
+            "사용자를 찾을 수 없습니다."
+        )
+
+    return convert_public_user(user)

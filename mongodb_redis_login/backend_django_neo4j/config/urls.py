@@ -1,17 +1,12 @@
-from django.contrib import admin
 from django.urls import (
+    include,
     path,
-    include
 )
+
 
 urlpatterns = [
     path(
-        "admin/",
-        admin.site.urls
-    ),
-
-    path(
         "api/",
-        include("app.urls")
+        include("app.urls"),
     ),
 ]

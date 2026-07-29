@@ -1,170 +1,63 @@
-from common.mongodb import sales_collection
+from app.repositories.dashboard_repository import (
+    find_category_sales,
+    find_channel_sales,
+    find_dashboard_kpi,
+    find_monthly_sales,
+    find_top_products,
+)
 
 
-def get_dashboard():
+def get_dashboard_kpi() -> dict:
+    result = find_dashboard_kpi()
 
-    pipeline = [
+    return {
+        "totalSalesCount": result.get(
+            "totalSalesCount",
+            0,
+        ),
+        "totalQuantity": result.get(
+            "totalQuantity",
+            0,
+        ),
+        "totalSalesAmount": result.get(
+            "totalSalesAmount",
+            0,
+        ),
+        "customerCount": result.get(
+            "customerCount",
+            0,
+        ),
+        "productCount": result.get(
+            "productCount",
+            0,
+        ),
+    }
+
+
+def get_monthly_sales() -> list[dict]:
+    records = find_monthly_sales()
+
+    return [
         {
-            "$addFields": {
-                "매출액": {
-                    "$multiply": [
-                        "$수량",
-                        "$단가",
-                        {
-                            "$subtract": [
-                                1,
-                                "$할인율"
-                            ]
-                        }
-                    ]
-                }
-            }
-        },
-        {
-            "$group": {
-                "_id": None,
-                "total_sales": {
-                    "$sum": "$매출액"
-                },
-                "total_quantity": {
-                    "$sum": "$수량"
-                },
-                "total_orders": {
-                    "$sum": 1
-                },
-                "customers": {
-                    "$addToSet": "$고객명"
-                }
-            }
-        },
-        {
-            "$project": {
-                "_id": 0,
-                "total_sales": 1,
-                "total_quantity": 1,
-                "total_orders": 1,
-                "customer_count": {
-                    "$size": "$customers"
-                }
-            }
+            **record,
+            "period": (
+                f"{record['year']}-"
+                f"{int(record['month']):02d}"
+            ),
         }
+        for record in records
     ]
 
-    result = list(
-        sales_collection.aggregate(
-            pipeline
-        )
-    )
 
-    if not result:
-        return {
-            "total_sales": 0,
-            "total_quantity": 0,
-            "total_orders": 0,
-            "customer_count": 0
-        }
-
-    return result[0]
+def get_top_products(
+    limit: int,
+) -> list[dict]:
+    return find_top_products(limit)
 
 
-def get_top_products():
-
-    pipeline = [
-        {
-            "$addFields": {
-                "매출액": {
-                    "$multiply": [
-                        "$수량",
-                        "$단가",
-                        {
-                            "$subtract": [
-                                1,
-                                "$할인율"
-                            ]
-                        }
-                    ]
-                }
-            }
-        },
-        {
-            "$group": {
-                "_id": "$제품명",
-                "sales": {
-                    "$sum": "$매출액"
-                },
-                "quantity": {
-                    "$sum": "$수량"
-                }
-            }
-        },
-        {
-            "$sort": {
-                "sales": -1
-            }
-        },
-        {
-            "$limit": 5
-        },
-        {
-            "$project": {
-                "_id": 0,
-                "product_name": "$_id",
-                "sales": 1,
-                "quantity": 1
-            }
-        }
-    ]
-
-    return list(
-        sales_collection.aggregate(
-            pipeline
-        )
-    )
+def get_category_sales() -> list[dict]:
+    return find_category_sales()
 
 
-def get_category_sales():
-
-    pipeline = [
-        {
-            "$addFields": {
-                "매출액": {
-                    "$multiply": [
-                        "$수량",
-                        "$단가",
-                        {
-                            "$subtract": [
-                                1,
-                                "$할인율"
-                            ]
-                        }
-                    ]
-                }
-            }
-        },
-        {
-            "$group": {
-                "_id": "$분류명",
-                "sales": {
-                    "$sum": "$매출액"
-                }
-            }
-        },
-        {
-            "$sort": {
-                "sales": -1
-            }
-        },
-        {
-            "$project": {
-                "_id": 0,
-                "category": "$_id",
-                "sales": 1
-            }
-        }
-    ]
-
-    return list(
-        sales_collection.aggregate(
-            pipeline
-        )
-    )
+def get_channel_sales() -> list[dict]:
+    return find_channel_sales()

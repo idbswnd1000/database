@@ -11,9 +11,5 @@ dependencies = [
     "djangorestframework-simplejwt",
     "bcrypt",
     "pymongo",
-    "redis",
-
-    # 추가
-    "neo4j",
-    "openpyxl"
+    "redis"
 ]

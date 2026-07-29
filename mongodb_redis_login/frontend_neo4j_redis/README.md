@@ -1,0 +1,1 @@
+npm install react-force-graph-2d react-d3-tree
