@@ -4,3 +4,5 @@ aws_n8n/n8n/data/
 .idea/
 __pycache__/
 *.pyc
+.env
+**/.env
