@@ -1,6 +1,10 @@
 pipeline {
     agent any
 
+    options {
+        skipDefaultCheckout(true)
+    }
+
     stages {
         stage('Checkout') {
             steps {
@@ -10,21 +14,25 @@ pipeline {
 
         stage('Create Env') {
             steps {
-                withCredentials([
-                    string(
-                        credentialsId: 'openai-api-key',
-                        variable: 'OPENAI_API_KEY'
-                    ),
-                    string(
-                        credentialsId: 'n8n-encryption-key',
-                        variable: 'N8N_ENCRYPTION_KEY'
-                    )
-                ]) {
-                    sh '''
-                    cat > .env <<EOF
+                dir('aws_n8n') {
+                    withCredentials([
+                        string(
+                            credentialsId: 'openai-api-key',
+                            variable: 'OPENAI_API_KEY'
+                        ),
+                        string(
+                            credentialsId: 'n8n-encryption-key',
+                            variable: 'N8N_ENCRYPTION_KEY'
+                        )
+                    ]) {
+                        sh '''
+                        cat > .env <<EOF
 APP_ENV=production
+
 OPENAI_API_KEY=${OPENAI_API_KEY}
+
 NGINX_PORT=80
+
 N8N_PORT=5678
 N8N_HOST=localhost
 N8N_PROTOCOL=http
@@ -32,28 +40,38 @@ N8N_PATH=/n8n/
 N8N_EDITOR_BASE_URL=http://localhost/n8n/
 WEBHOOK_URL=http://localhost/n8n/
 N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+
 GENERIC_TIMEZONE=Asia/Seoul
 TZ=Asia/Seoul
+
+VITE_N8N_MENU_ANALYZE_URL=/api/menu/analyze
+VITE_N8N_MENU_DETAIL_URL=/api/menu/detail
+VITE_N8N_MENU_CHAT_URL=/api/menu/chat
 EOF
-                    '''
+                        '''
+                    }
                 }
             }
         }
 
         stage('Deploy') {
             steps {
-                sh '''
-                docker compose down
-                docker compose up -d --build
-                '''
+                dir('aws_n8n') {
+                    sh '''
+                    docker compose down
+                    docker compose up -d --build
+                    '''
+                }
             }
         }
 
         stage('Check') {
             steps {
-                sh '''
-                docker compose ps
-                '''
+                dir('aws_n8n') {
+                    sh '''
+                    docker compose ps
+                    '''
+                }
             }
         }
     }
@@ -68,9 +86,11 @@ EOF
         }
 
         always {
-            sh '''
-            rm -f .env
-            '''
+            dir('aws_n8n') {
+                sh '''
+                rm -f .env
+                '''
+            }
         }
     }
 }
