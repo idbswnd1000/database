@@ -1,0 +1,76 @@
+pipeline {
+    agent any
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Create Env') {
+            steps {
+                withCredentials([
+                    string(
+                        credentialsId: 'openai-api-key',
+                        variable: 'OPENAI_API_KEY'
+                    ),
+                    string(
+                        credentialsId: 'n8n-encryption-key',
+                        variable: 'N8N_ENCRYPTION_KEY'
+                    )
+                ]) {
+                    sh '''
+                    cat > .env <<EOF
+APP_ENV=production
+OPENAI_API_KEY=${OPENAI_API_KEY}
+NGINX_PORT=80
+N8N_PORT=5678
+N8N_HOST=localhost
+N8N_PROTOCOL=http
+N8N_PATH=/n8n/
+N8N_EDITOR_BASE_URL=http://localhost/n8n/
+WEBHOOK_URL=http://localhost/n8n/
+N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+GENERIC_TIMEZONE=Asia/Seoul
+TZ=Asia/Seoul
+EOF
+                    '''
+                }
+            }
+        }
+
+        stage('Deploy') {
+            steps {
+                sh '''
+                docker compose down
+                docker compose up -d --build
+                '''
+            }
+        }
+
+        stage('Check') {
+            steps {
+                sh '''
+                docker compose ps
+                '''
+            }
+        }
+    }
+
+    post {
+        success {
+            echo '배포 성공'
+        }
+
+        failure {
+            echo '배포 실패'
+        }
+
+        always {
+            sh '''
+            rm -f .env
+            '''
+        }
+    }
+}

@@ -1,0 +1,599 @@
+{
+  "name": "n8n_ocr",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "menu-analyze",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -384,
+        48
+      ],
+      "id": "f624928b-e45c-4a07-87ec-f3ab8d0be608",
+      "name": "Webhook",
+      "webhookId": "c4c3b554-9a0b-4428-a2a0-128928a3e5b5"
+    },
+    {
+      "parameters": {
+        "resource": "image",
+        "operation": "analyze",
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list",
+          "cachedResultName": "GPT-4O-MINI"
+        },
+        "text": "Analyze the entire restaurant menu image carefully.\n\nFind every visible menu item in every section.\n\nYou must include:\n- menu items with photos\n- menu items without photos\n- small text-only menu lists\n- noodle sections\n- drink sections\n- items near the bottom of the image\n\nScan the image:\n1. top to bottom\n2. left to right\n3. perform a second scan before returning the result\n\nFor every menu item, return:\n- menu name\n- numeric price\n- the location of the menu-name and price text\n\nThe bounding box must cover the text area containing the menu name and price.\nDo not place the bounding box over the food photograph.\nDo not include category titles.\n\nCoordinates must use integers from 0 to 1000 relative to the full image.\n\nReturn only valid JSON.\nDo not use markdown or code blocks.\n\nRequired format:\n\n{\n  \"detectedMenuCount\": 11,\n  \"menus\": [\n    {\n      \"id\": \"menu-1\",\n      \"section\": \"main\",\n      \"menuName\": \"비빔밥\",\n      \"price\": 12000,\n      \"box\": {\n        \"x\": 100,\n        \"y\": 290,\n        \"width\": 220,\n        \"height\": 50\n      }\n    }\n  ]\n}\n\nRules:\n- Preserve the original menu name.\n- price must contain digits only.\n- Include all menu-name and price pairs.\n- Include text-only items.\n- Exclude headings such as 메뉴, 면류, 음료.\n- Sort by top-to-bottom and left-to-right.\n- The box must cover text, not the food photo.\nYou must detect menu items from every section.\n\nPerform the following scans before returning:\n1. Scan all large menu items with photographs.\n2. Scan all text-only menu rows.\n3. Scan category sections near the bottom.\n4. Scan noodle and drink sections.\n5. Perform a final verification scan from bottom to top.\n\nA menu item must not be omitted only because:\n- it has no photograph\n- the text is small\n- it is near the bottom\n- its name and price are separated\n- it belongs to a secondary category\n\nReturn every menu-name and price pair that is visible.",
+        "inputType": "base64",
+        "binaryPropertyName": "image",
+        "simplify": false,
+        "options": {
+          "maxTokens": 4096
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.3,
+      "position": [
+        -160,
+        48
+      ],
+      "id": "ba27a636-692d-40d8-a170-ceff71e3cf0e",
+      "name": "Analyze image",
+      "credentials": {
+        "openAiApi": {
+          "id": "UnRzP7fyR3WvYzYT",
+          "name": "OpenAI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const raw =\n  $json.output?.[0]?.content?.[0]?.text;\n\nif (!raw) {\n  return {\n    json: {\n      menus: [],\n      error: \"EMPTY_OPENAI_RESPONSE\",\n      message: \"OpenAI 응답이 비어 있습니다.\",\n    },\n  };\n}\n\nconst cleaned = String(raw)\n  .replace(/```json/gi, \"\")\n  .replace(/```/g, \"\")\n  .trim();\n\nlet parsed;\n\ntry {\n  parsed = JSON.parse(cleaned);\n} catch {\n  return {\n    json: {\n      menus: [],\n      error: \"INVALID_JSON\",\n      message:\n        \"OpenAI 응답을 JSON으로 변환하지 못했습니다.\",\n      raw: cleaned,\n    },\n  };\n}\n\nconst sourceMenus = Array.isArray(parsed.menus)\n  ? parsed.menus\n  : [];\n\nconst menus = sourceMenus\n  .map((menu, index) => {\n    const box =\n      menu.box ??\n      menu.boundingBox ??\n      menu.bounding_box ??\n      {};\n\n    const menuName =\n      menu.menuName ??\n      menu.menu_name ??\n      menu.name ??\n      \"\";\n\n    const price = Number(\n      String(menu.price ?? \"\").replace(\n        /[^0-9]/g,\n        \"\",\n      ),\n    );\n\n    const x = Number(\n      box.x ?? box.left ?? box.xmin ?? 0,\n    );\n\n    const y = Number(\n      box.y ?? box.top ?? box.ymin ?? 0,\n    );\n\n    let width = Number(box.width ?? 0);\n    let height = Number(box.height ?? 0);\n\n    if (\n      !width &&\n      box.xmax !== undefined\n    ) {\n      width = Number(box.xmax) - x;\n    }\n\n    if (\n      !height &&\n      box.ymax !== undefined\n    ) {\n      height = Number(box.ymax) - y;\n    }\n\n    return {\n      id:\n        menu.id ||\n        `menu-${index + 1}`,\n      section: menu.section || \"\",\n      menuName,\n      price,\n      box: {\n        x,\n        y,\n        width,\n        height,\n      },\n    };\n  })\n  .filter(\n    (menu) =>\n      menu.menuName &&\n      menu.price > 0 &&\n      menu.box.width > 0 &&\n      menu.box.height > 0,\n  );\n\nreturn {\n  json: {\n    detectedMenuCount: menus.length,\n    menus,\n  },\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        64,
+        48
+      ],
+      "id": "1e6592cc-5726-4227-861c-dedf2e4ec2de",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        288,
+        48
+      ],
+      "id": "7b355aea-180d-41d8-958f-5bfc82a4088e",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "menu-detail",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -384,
+        272
+      ],
+      "id": "174b2c78-d53d-4539-8e34-936ececa56f0",
+      "name": "Webhook1",
+      "webhookId": "c4c3b554-9a0b-4428-a2a0-128928a3e5b5"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const raw =\n  $json.text ??\n  $json.output?.[0]?.content?.[0]?.text ??\n  $json.content;\n\nif (!raw) {\n  return {\n    json: {\n      error: \"EMPTY_OPENAI_RESPONSE\",\n      message: \"OpenAI 상세정보 응답이 비어 있습니다.\",\n    },\n  };\n}\n\nconst cleaned = String(raw)\n  .replace(/```json/gi, \"\")\n  .replace(/```/g, \"\")\n  .trim();\n\ntry {\n  return {\n    json: JSON.parse(cleaned),\n  };\n} catch {\n  return {\n    json: {\n      error: \"INVALID_JSON\",\n      message: \"상세정보 응답을 JSON으로 변환하지 못했습니다.\",\n      raw: cleaned,\n    },\n  };\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        192,
+        272
+      ],
+      "id": "77555e04-f7f7-4618-aca0-1655d90df2dd",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        416,
+        272
+      ],
+      "id": "ed8fe220-4e90-486a-bc16-cba1e77e081e",
+      "name": "Respond to Webhook1"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list",
+          "cachedResultName": "GPT-4O-MINI"
+        },
+        "responses": {
+          "values": [
+            {
+              "content": "=Provide general food information for the following Korean menu item.\n\nMenu name:\n{{ $json.body.menuName }}\n\nRequested response language:\n{{ $json.body.language }}\n\nLanguage rules:\n- ko: write description, flavor, cooking method, ingredients and allergens in Korean.\n- en: write them in English.\n- ja: write them in Japanese.\n- zh: write them in Simplified Chinese.\n- Always provide all three translations: English, Chinese and Japanese.\n\nReturn only valid JSON.\nDo not use markdown or code blocks.\n\n{\n  \"originalName\": \"\",\n  \"translations\": {\n    \"english\": \"\",\n    \"chinese\": \"\",\n    \"japanese\": \"\"\n  },\n  \"description\": \"\",\n  \"flavor\": [],\n  \"cookingMethod\": \"\",\n  \"ingredients\": [],\n  \"allergens\": [],\n  \"nutrition\": {\n    \"calories\": \"\",\n    \"protein\": \"\",\n    \"carbohydrates\": \"\",\n    \"fat\": \"\"\n  }\n}\n\nRules:\n- Use general common-recipe information.\n- Do not claim restaurant-specific ingredients.\n- Nutrition values must be estimated ranges.\n- flavor, ingredients and allergens must always be arrays."
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.3,
+      "position": [
+        -160,
+        272
+      ],
+      "id": "38e9c960-1353-4851-8071-718402e95424",
+      "name": "Message a model",
+      "credentials": {
+        "openAiApi": {
+          "id": "UnRzP7fyR3WvYzYT",
+          "name": "OpenAI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "menu-chat",
+        "responseMode": "responseNode",
+        "options": {
+          "binaryPropertyName": "audio"
+        }
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -384,
+        592
+      ],
+      "id": "8b8ee7ba-f7ca-4090-a130-b0c01e3b57b6",
+      "name": "Webhook2",
+      "webhookId": "c4c3b554-9a0b-4428-a2a0-128928a3e5b5"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "3fa7e3f7-c5d4-403e-a67f-dc0b9c91560e",
+              "leftValue": "={{ !!$binary.audio0 }}",
+              "rightValue": "={{ true }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -160,
+        592
+      ],
+      "id": "e3734c83-e527-4116-932b-cc2f710dc463",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "resource": "audio",
+        "operation": "transcribe",
+        "binaryPropertyName": "audio0",
+        "options": {
+          "language": "en"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.3,
+      "position": [
+        64,
+        496
+      ],
+      "id": "1b0d1058-c242-414f-817c-af23e64e9b78",
+      "name": "Transcribe a recording",
+      "credentials": {
+        "openAiApi": {
+          "id": "UnRzP7fyR3WvYzYT",
+          "name": "OpenAI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "3c104c18-12d5-480a-a993-d36ed3d83938",
+              "name": "transcript",
+              "value": "={{ $json.text }}",
+              "type": "string"
+            },
+            {
+              "id": "8a04e1d4-0a83-49a9-8e1a-0449eda6f2a9",
+              "name": "menuName",
+              "value": "={{ $('Webhook2').item.json.body.menuName }}",
+              "type": "string"
+            },
+            {
+              "id": "7208c25c-aba3-4fa6-8059-b977ddbb5170",
+              "name": "translatedName",
+              "value": "={{ $('Webhook2').item.json.body.translatedName }}",
+              "type": "string"
+            },
+            {
+              "id": "4761c27a-6d6b-4837-9ee8-84a785c8e54e",
+              "name": "description",
+              "value": "={{ $('Webhook2').item.json.body.description }}",
+              "type": "string"
+            },
+            {
+              "id": "9af4404e-9f1f-4e68-8141-dfc238be6bcb",
+              "name": "ingredients",
+              "value": "={{ $('Webhook2').item.json.body.ingredients }}",
+              "type": "string"
+            },
+            {
+              "id": "8f7337eb-c996-4518-823a-30acebfee6bf",
+              "name": "allergens",
+              "value": "={{ $('Webhook2').item.json.body.allergens }}",
+              "type": "string"
+            },
+            {
+              "id": "bb31c38b-c87c-4f34-97a4-e1cc00d4873a",
+              "name": "flavor",
+              "value": "={{ $('Webhook2').item.json.body.flavor }}",
+              "type": "string"
+            },
+            {
+              "id": "c98e9414-1e8a-4a77-8beb-ca39a6ef33ef",
+              "name": "cookingMethod",
+              "value": "={{ $('Webhook2').item.json.body.cookingMethod }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        288,
+        496
+      ],
+      "id": "11c618b4-8af1-45f2-b64b-6ce9fc118b35",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list",
+          "cachedResultName": "GPT-4O-MINI"
+        },
+        "responses": {
+          "values": [
+            {
+              "content": "=You are an English restaurant menu assistant.\n\nYour job is to answer the user's question ONLY using the provided menu information.\n\nMenu Name:\n{{ $json.menuName }}\n\nEnglish Name:\n{{ $json.translatedName }}\n\nDescription:\n{{ $json.description }}\n\nFlavor:\n{{ $json.flavor }}\n\nCooking Method:\n{{ $json.cookingMethod }}\n\nIngredients:\n{{ $json.ingredients }}\n\nAllergens:\n{{ $json.allergens }}\n\nUser Question:\n{{ $json.transcript }}\n\nInstructions:\n\n- Answer only in English.\n- Maximum 3 sentences.\n- Use only the information above.\n- If the requested information is unknown, say you don't have enough information and advise confirming with the restaurant.\n- Never invent ingredients or allergens.\n- Return ONLY valid JSON.\n- No markdown.\n- No explanations.\n\nReturn exactly:\n\n{\n  \"transcript\":\"{{ $json.transcript }}\",\n  \"answer\":\"...\"\n}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.3,
+      "position": [
+        512,
+        592
+      ],
+      "id": "63a35f7f-08b7-4ff8-98c6-8720dcfff486",
+      "name": "Message a model1",
+      "credentials": {
+        "openAiApi": {
+          "id": "UnRzP7fyR3WvYzYT",
+          "name": "OpenAI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const raw =\n  $json.text ??\n  $json.output?.[0]?.content?.[0]?.text ??\n  $json.content ??\n  $json.response;\n\nif (!raw) {\n  throw new Error(\"AI response is empty.\");\n}\n\nif (typeof raw === \"object\") {\n  return {\n    json: raw,\n  };\n}\n\nconst cleaned = raw\n  .replace(/^```json/i, \"\")\n  .replace(/^```/, \"\")\n  .replace(/```$/, \"\")\n  .trim();\n\nconst parsed = JSON.parse(cleaned);\n\nreturn {\n  json: parsed,\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        864,
+        592
+      ],
+      "id": "4f79ed1d-67da-4bdf-8c95-d4318594d337",
+      "name": "Code in JavaScript2"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1088,
+        592
+      ],
+      "id": "db5cd7d7-9152-4fc2-ab6a-fa6082a770d6",
+      "name": "Respond to Webhook2"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "3c104c18-12d5-480a-a993-d36ed3d83938",
+              "name": "transcript",
+              "value": "={{ $json.text }}",
+              "type": "string"
+            },
+            {
+              "id": "8a04e1d4-0a83-49a9-8e1a-0449eda6f2a9",
+              "name": "menuName",
+              "value": "={{ $('Webhook2').item.json.body.menuName }}",
+              "type": "string"
+            },
+            {
+              "id": "7208c25c-aba3-4fa6-8059-b977ddbb5170",
+              "name": "translatedName",
+              "value": "={{ $('Webhook2').item.json.body.translatedName }}",
+              "type": "string"
+            },
+            {
+              "id": "4761c27a-6d6b-4837-9ee8-84a785c8e54e",
+              "name": "description",
+              "value": "={{ $('Webhook2').item.json.body.description }}",
+              "type": "string"
+            },
+            {
+              "id": "9af4404e-9f1f-4e68-8141-dfc238be6bcb",
+              "name": "ingredients",
+              "value": "={{ $('Webhook2').item.json.body.ingredients }}",
+              "type": "string"
+            },
+            {
+              "id": "8f7337eb-c996-4518-823a-30acebfee6bf",
+              "name": "allergens",
+              "value": "={{ $('Webhook2').item.json.body.allergens }}",
+              "type": "string"
+            },
+            {
+              "id": "bb31c38b-c87c-4f34-97a4-e1cc00d4873a",
+              "name": "flavor",
+              "value": "={{ $('Webhook2').item.json.body.flavor }}",
+              "type": "string"
+            },
+            {
+              "id": "c98e9414-1e8a-4a77-8beb-ca39a6ef33ef",
+              "name": "cookingMethod",
+              "value": "={{ $('Webhook2').item.json.body.cookingMethod }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        288,
+        688
+      ],
+      "id": "ab0ef065-7e4f-4c77-817b-100dd163cea0",
+      "name": "Edit Fields1"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Analyze image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze image": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook1": {
+      "main": [
+        [
+          {
+            "node": "Message a model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message a model": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook2": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Transcribe a recording",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Edit Fields1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transcribe a recording": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Message a model1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message a model1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript2": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields1": {
+      "main": [
+        [
+          {
+            "node": "Message a model1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "b6cc3716-a5a2-46a6-895d-1d711245efd3",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "957b42d78006a4709098396864cad0da41f0d607ffcc9d83e349a6b6a895b693"
+  },
+  "nodeGroups": [],
+  "id": "lNZy5u7ojXTjucxx",
+  "tags": []
+}

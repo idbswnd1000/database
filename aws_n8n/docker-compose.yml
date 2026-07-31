@@ -1,0 +1,68 @@
+services:
+  backend:
+    build:
+      context: ./backend
+    container_name: menu-backend
+    restart: unless-stopped
+    environment:
+      N8N_BASE_URL: http://n8n:5678
+    expose:
+      - "8000"
+    depends_on:
+      - n8n
+    networks:
+      - menu-network
+
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: menu-n8n
+    restart: unless-stopped
+
+    environment:
+      N8N_HOST: 52.78.181.34
+      N8N_PORT: 5678
+      N8N_PROTOCOL: http
+
+      N8N_EDITOR_BASE_URL: http://52.78.181.34:5678
+      WEBHOOK_URL: http://52.78.181.34:5678/
+
+      N8N_SECURE_COOKIE: "false"
+      GENERIC_TIMEZONE: Asia/Seoul
+      TZ: Asia/Seoul
+
+    ports:
+      - "5678:5678"
+
+    volumes:
+      - ./n8n/data:/home/node/.n8n
+      - ./n8n/workflows:/workflows:ro
+
+    networks:
+      - menu-network
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: menu-frontend
+    restart: unless-stopped
+    expose:
+      - "80"
+    networks:
+      - menu-network
+
+  nginx:
+    build:
+      context: ./nginx
+    container_name: menu-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - menu-network
+
+networks:
+  menu-network:
+    driver: bridge

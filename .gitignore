@@ -1,0 +1,6 @@
+aws_n8n/.env
+aws_n8n/n8n/data/
+*.ppk
+.idea/
+__pycache__/
+*.pyc

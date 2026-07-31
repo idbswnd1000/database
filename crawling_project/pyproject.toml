@@ -1,0 +1,15 @@
+[project]
+name = "crawling-project"
+version = "0.1.0"
+requires-python = ">=3.13"
+
+dependencies = [
+    "beautifulsoup4==4.12.3",
+    "requests==2.32.3",
+    "lxml==5.3.0",
+    "pandas==2.2.3",
+    "tqdm==4.67.1",
+    "selenium==4.27.1",
+    "webdriver-manager==4.0.2",
+    "pandas-stubs~=2.2.3",
+]
