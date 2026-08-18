@@ -7,3 +7,4 @@ __pycache__/
 .env
 **/.env.env
 aws_n8n/.env mongodb_practice/.env n8n/.env redis_practice/.env
+aws_n8n/.env
